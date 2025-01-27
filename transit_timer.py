@@ -10,11 +10,12 @@ import time
 from operator import itemgetter
 from itertools import groupby
 
-
+import pycron
+import pytz
 import requests
 import yaml
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template
 from humanize import naturaltime
 from google.transit import gtfs_realtime_pb2
 
@@ -127,7 +128,7 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
     stop_name = gtfs_lookup(gtfs_static_data["stops"], "stop_id", f"^{stop_id}$")
     stop_name = ' + '.join({_["stop_name"] for _ in stop_name})
 
-    background_color = settings["transit_type"][transit_type]["stops"][stop_name]["background_color"]
+    background_color=settings["transit_type"][transit_type]["stops"][stop_name]["background_color"]
 
     return {
             "stop_name": stop_name,
@@ -136,6 +137,29 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
             "arrival_time_seconds": update.arrival.time - time.time(),
             "background_color": background_color,
     }
+
+def display_stop(timezone, schedule):
+    ''' display_stop '''
+
+    # Convert to Eastern Time
+    my_timezone = pytz.timezone(timezone)
+    my_datetime = datetime.datetime.now().astimezone(my_timezone)
+
+    return bool(pycron.is_now(schedule, my_datetime))
+
+def is_quiet_time(settings):
+    ''' is_quiet_time '''
+    total_stops = 0
+    deleted_stops = 0
+    for transit_type in settings["transit_type"]:
+        for stop in list(settings["transit_type"][transit_type]["stops"].keys()):
+            if not display_stop("US/Eastern",
+                                settings["transit_type"][transit_type]["stops"][stop]["schedule"]):
+                del settings["transit_type"][transit_type]["stops"][stop]
+                deleted_stops += 1
+            total_stops += 1
+
+    return bool(deleted_stops == total_stops)
 
 
 @app.route('/starting_point/<starting_point>')
@@ -147,6 +171,10 @@ def index(starting_point):
 
     entities = {}
     arrivals = []
+
+    if is_quiet_time(settings):
+        return render_template("quiet_time.html")
+
 
     for transit_type in settings["transit_type"]:
         gtfs_static_data_folder = settings["transit_type"][transit_type]["gtfs_static_data"]
@@ -180,9 +208,11 @@ def index(starting_point):
     # Replace the original list with the filtered list
     arrivals = sorted(filtered_data, key=itemgetter("stop_name", "arrival_time_seconds"))
 
+    my_datetime = datetime.datetime.now().astimezone(pytz.timezone(settings["timezone"]))
+
     return render_template("index.html",
                            arrivals=arrivals,
-                           last_updated=datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p"))
+                           last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"))
 
 # Run the app
 if __name__ == '__main__':
