@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transit Arrivals</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <meta http-equiv="refresh" content="60">
+    <style>
+        body {
+            font-size: 1.5rem; /* Optimized for tablet readability */
+        }
+        .arrival-time-green {
+            color: green;
+            font-weight: bold;
+        }
+        .arrival-time-red {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto py-8">
+        <div class="bg-white shadow-md rounded-lg p-6">
+
+            {% if arrivals %}
+                <table class="table-auto w-full border-collapse border border-gray-200">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="border border-gray-300 px-4 py-4 text-left">Stop</th>
+                            <th class="border border-gray-300 px-4 py-4 text-left">Route</th>
+                            <th class="border border-gray-300 px-4 py-4 text-left">Arrival Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for arrival in arrivals %}
+                        <tr class="hover:bg-gray-100;" bgcolor="{{ arrival.background_color }}">
+                            <td class="border border-gray-300 px-4 py-4">{{ arrival.stop_name }}</td>
+                            <td class="border border-gray-300 px-4 py-4">{{ arrival.route_name }}</td>
+                            <td class="border border-gray-300 px-4 py-4">
+                                <span class="{% if arrival.arrival_time_seconds <= 300 %}arrival-time-green{% else %}arrival-time-red{% endif %}">
+                                    {{ arrival.arrival_time }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="text-gray-600 text-center">No arrivals to display. Please check the starting point or transit type.</p>
+            {% endif %}
+        </div>
+        <p class="text-sm text-gray-500 text-center mt-4">Last Updated: {{ last_updated }}</p>
+    </div>
+</body>
+</html>

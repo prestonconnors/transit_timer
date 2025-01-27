@@ -1,0 +1,24 @@
+bus_key_file: "bus_key"
+stops_to_return: 3
+
+transit_type:
+  bus:
+    gtfs_static_data: "gtfs_m"
+    gtfs-rt_urls:
+      - "https://gtfsrt.prod.obanyc.com/tripUpdates"
+    stops:
+      "1 AV/E 57 ST":
+        "time_to_stop": 300
+        "background_color": "pink"
+      "3 AV/E 57 ST":
+        "background_color": "orange"
+        "time_to_stop": 300
+
+  subway:
+    gtfs_static_data: "gtfs_subway"
+    gtfs-rt_urls:
+      - "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace"
+    stops:
+      "Lexington Av/53 St":
+        "time_to_stop": 300
+        "background_color": "blue"
