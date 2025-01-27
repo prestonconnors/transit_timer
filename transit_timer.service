@@ -1,0 +1,16 @@
+[Unit]
+Description=Gunicorn instance to serve Transit Timer Flask app
+After=network.target
+
+[Service]
+User=preston
+Group=www-data
+WorkingDirectory=/home/preston/transit_timer
+ExecStart=/home/preston/transit_timer/venv/bin/gunicorn --config /home/preston/transit_timer/gunicorn_config.py wsgi:app
+
+# Restart policy
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
