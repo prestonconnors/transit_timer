@@ -6,7 +6,7 @@ After=network.target
 User=preston
 Group=www-data
 WorkingDirectory=/home/preston/transit_timer
-ExecStart=/home/preston/transit_timer/venv/bin/gunicorn --config /home/preston/transit_timer/gunicorn_config.py wsgi:app
+ExecStart=/home/preston/transit_timer/venv/bin/gunicorn --config /home/preston/transit_timer/gunicorn_config.py transit_timer:app
 
 # Restart policy
 Restart=always
