@@ -169,11 +169,14 @@ def index(starting_point):
     # Get starting_point parameter from the request
     settings = load_settings(starting_point)
 
+    my_datetime = datetime.datetime.now().astimezone(pytz.timezone(settings["timezone"]))
+
     entities = {}
     arrivals = []
 
     if is_quiet_time(settings):
-        return render_template("quiet_time.html")
+        return render_template("quiet_time.html",
+                               last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"))
 
 
     for transit_type in settings["transit_type"]:
@@ -207,8 +210,6 @@ def index(starting_point):
 
     # Replace the original list with the filtered list
     arrivals = sorted(filtered_data, key=itemgetter("stop_name", "arrival_time_seconds"))
-
-    my_datetime = datetime.datetime.now().astimezone(pytz.timezone(settings["timezone"]))
 
     return render_template("index.html",
                            arrivals=arrivals,
