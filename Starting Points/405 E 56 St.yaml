@@ -26,3 +26,4 @@ transit_type:
         "time_to_stop": 300
         "background_color": "blue"
         "schedule": "* 6-21 * * 0,2,5,6"
+        "schedule": "* * * * *"
