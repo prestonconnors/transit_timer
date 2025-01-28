@@ -3,12 +3,16 @@
 import csv
 import copy
 import datetime
+import heapq
 import os
 import re
 import time
 
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from operator import itemgetter
 from itertools import groupby
+
 
 import pycron
 import pytz
@@ -23,55 +27,64 @@ from google.transit import gtfs_realtime_pb2
 templates_folder = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")
 app = Flask(__name__, template_folder=templates_folder)
 
-def get_gtfs_static_data(gtfs_static_data):
-    ''' Get static GTFS data '''
+# Cache static GTFS data at app startup
+gtfs_static_data_cache = {}
+
+def load_gtfs_static_data(gtfs_static_data_folder):
+    ''' Load static GTFS data into cache '''
     data_dict = {}
-    for file_name in os.listdir(gtfs_static_data):
-        file_path = os.path.join(gtfs_static_data, file_name)
+    for file_name in os.listdir(gtfs_static_data_folder):
+        file_path = os.path.join(gtfs_static_data_folder, file_name)
         if os.path.isfile(file_path):
             with open(file_path, encoding="utf-8") as file:
                 data = list(csv.DictReader(file))
                 data_dict[os.path.splitext(os.path.basename(file_path))[0]] = data
-
     return data_dict
 
+def get_gtfs_static_data(gtfs_static_data_folder):
+    ''' Return cached static GTFS data '''
+    if gtfs_static_data_folder not in gtfs_static_data_cache:
+        gtfs_static_data_cache[gtfs_static_data_folder] = load_gtfs_static_data(gtfs_static_data_folder)
+    return gtfs_static_data_cache[gtfs_static_data_folder]
+
 def gtfs_lookup(data, column_name, match):
-    '''Look up GTFS data'''
-    matches = []
-    for d_d in data:
-        if re.search(match, d_d[column_name]):
-        #if match == d_d[column_name]:
-            matches.append(d_d)
-    return matches
+    '''Look up GTFS data with precompiled regex'''
+    pattern = re.compile(match)
+    return [d_d for d_d in data if pattern.search(d_d[column_name])]
+
+def fetch_gtfs_data(url):
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    return response.content
 
 def get_stops(settings, gtfs_static_data, transit_type):
-    ''' Get Stops'''
+    ''' Get Stops with parallel HTTP requests '''
     if transit_type == "bus":
         with open(settings["bus_key_file"], "r", encoding="utf-8") as file:
             key = f"?key={file.read().strip()}"
     else:
         key = ""
 
-    stop_ids = []
-    stop_names = list(settings["transit_type"][transit_type]["stops"])
-    for stop_name in stop_names:
-        stop_ids += [_["stop_id"] for _ in gtfs_lookup(gtfs_static_data["stops"],
-                                                       "stop_name",
-                                                       stop_name)]
+    stop_ids = [
+        _["stop_id"] for stop_name in settings["transit_type"][transit_type]["stops"]
+        for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", stop_name)
+    ]
 
-    for gtfs_rt_url in settings["transit_type"][transit_type]["gtfs-rt_urls"]:
-        feed = gtfs_realtime_pb2.FeedMessage()
-        url = f"{gtfs_rt_url}{key}"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        feed.ParseFromString(response.content)
+    urls = [
+        f"{gtfs_rt_url}{key}"
+        for gtfs_rt_url in settings["transit_type"][transit_type]["gtfs-rt_urls"]
+    ]
 
-        entities = []
-        for entity in feed.entity:
-            entity = clean_entity(stop_ids, entity)
-
-            if len(list(entity.trip_update.stop_time_update)) > 0:
-                entities.append(entity)
+    entities = []
+    with ThreadPoolExecutor() as executor:
+        responses = executor.map(fetch_gtfs_data, urls)
+        for content in responses:
+            feed = gtfs_realtime_pb2.FeedMessage()
+            feed.ParseFromString(content)
+            for entity in feed.entity:
+                entity = clean_entity(stop_ids, entity)
+                if len(entity.trip_update.stop_time_update) > 0:
+                    entities.append(entity)
 
     upcoming_stops(settings["stops_to_return"], entities)
     return entities
@@ -88,17 +101,15 @@ def clean_entity(stop_ids, entity):
     return entity
 
 def upcoming_stops(stops_to_return, entities):
-    '''Return the N upcoming stop updates'''
-
+    '''Return the N upcoming stop updates with optimized sorting'''
     stop_id = {}
     for entity in entities:
         for update in entity.trip_update.stop_time_update:
-            if update.stop_id not in stop_id:
-                stop_id[update.stop_id] = []
-            stop_id[update.stop_id].append(update.arrival.time)
+            stop_id.setdefault(update.stop_id, [])
+            heapq.heappush(stop_id[update.stop_id], update.arrival.time)
 
     for key, value in stop_id.items():
-        stop_id[key] = sorted(value)[0:stops_to_return]
+        stop_id[key] = heapq.nsmallest(stops_to_return, value)
 
 def load_settings(starting_point):
     ''' load_settings '''
@@ -114,7 +125,6 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
 
     stop_id = update.stop_id
 
-    # Lookup static GTFS data
     route_short_name = gtfs_lookup(gtfs_static_data["routes"],
                                    "route_id",
                                    f"^{entity.trip_update.trip.route_id}$")
@@ -141,7 +151,6 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
 def display_stop(timezone, schedule):
     ''' display_stop '''
 
-    # Convert to Eastern Time
     my_timezone = pytz.timezone(timezone)
     my_datetime = datetime.datetime.now().astimezone(my_timezone)
 
@@ -153,7 +162,7 @@ def is_quiet_time(settings):
     deleted_stops = 0
     for transit_type in settings["transit_type"]:
         for stop in list(settings["transit_type"][transit_type]["stops"].keys()):
-            if not display_stop("US/Eastern",
+            if not display_stop(settings["timezone"],
                                 settings["transit_type"][transit_type]["stops"][stop]["schedule"]):
                 del settings["transit_type"][transit_type]["stops"][stop]
                 deleted_stops += 1
@@ -161,12 +170,12 @@ def is_quiet_time(settings):
 
     return bool(deleted_stops == total_stops)
 
-
 @app.route('/starting_point/<starting_point>')
 def index(starting_point):
     ''' index '''
 
-    # Get starting_point parameter from the request
+    start_time = time.time()
+
     settings = load_settings(starting_point)
 
     my_datetime = datetime.datetime.now().astimezone(pytz.timezone(settings["timezone"]))
@@ -197,23 +206,24 @@ def index(starting_point):
                                                          update))
 
     arrivals = sorted(arrivals, key=itemgetter("stop_name", "arrival_time_seconds"))
-    # Group entries by 'stop_name'
-    grouped_data = groupby(arrivals, key=itemgetter('stop_name'))
 
-    # Create a new list that will store only the first 3 entries for each group
+    grouped_data = defaultdict(list)
+    for arrival in arrivals:
+        grouped_data[arrival["stop_name"]].append(arrival)
+
     filtered_data = []
+    for _, group in grouped_data.items():
+        filtered_data.extend(sorted(group, key=lambda x: x["arrival_time_seconds"])
+                            [:settings["stops_to_return"]])
 
-    # Iterate over each group and add only the first 3 entries of each stop_name to the list
-    for _, group in grouped_data:
-        group_list = list(group)  # Convert the group to a list to work with
-        filtered_data.extend(group_list[:3])  # Add only the first 3 entries
-
-    # Replace the original list with the filtered list
     arrivals = sorted(filtered_data, key=itemgetter("stop_name", "arrival_time_seconds"))
+
+    elapsed_time = time.time() - start_time
 
     return render_template("index.html",
                            arrivals=arrivals,
-                           last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"))
+                           last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"),
+                           elapsed_time=round(elapsed_time,2))
 
 # Run the app
 if __name__ == '__main__':

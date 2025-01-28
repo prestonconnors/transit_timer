@@ -8,37 +8,53 @@
     <meta http-equiv="refresh" content="60">
     <style>
         body {
-            font-size: 1.5rem; /* Optimized for tablet readability */
+            font-size: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            margin: 0;
+            overflow: auto;
+            height: 100%;
+            max-width: 100%;
         }
-        .arrival-time-green {
-            color: green;
-            font-weight: bold;
+        table {
+            width: 100vw;
+            max-width: 100%;
+            table-layout: fixed;
+            border-spacing: 0;
         }
-        .arrival-time-red {
-            color: red;
+        th, td {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            text-align: center;
+            padding: 0.5rem;
+        }
+        th {
+            background-color: #f9fafb;
             font-weight: bold;
         }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
-    <div class="container mx-auto py-8">
-        <div class="bg-white shadow-md rounded-lg p-6">
+    <div class="w-full px-4">
+        <div class="bg-white shadow-md rounded-lg w-full max-w-screen-lg overflow-hidden">
 
             {% if arrivals %}
-                <table class="table-auto w-full border-collapse border border-gray-200">
+                <table class="border-collapse border border-gray-200">
                     <thead>
-                        <tr class="bg-gray-50">
-                            <th class="border border-gray-300 px-4 py-4 text-left">Stop</th>
-                            <th class="border border-gray-300 px-4 py-4 text-left">Route</th>
-                            <th class="border border-gray-300 px-4 py-4 text-left">Arrival Time</th>
+                        <tr>
+                            <th class="border border-gray-300">Stop</th>
+                            <th class="border border-gray-300">Route</th>
+                            <th class="border border-gray-300">Arrival Time</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for arrival in arrivals %}
-                        <tr class="hover:bg-gray-100;" bgcolor="{{ arrival.background_color }}">
-                            <td class="border border-gray-300 px-4 py-4">{{ arrival.stop_name }}</td>
-                            <td class="border border-gray-300 px-4 py-4">{{ arrival.route_name }}</td>
-                            <td class="border border-gray-300 px-4 py-4">
+                        <tr bgcolor="{{ arrival.background_color }}">
+                            <td class="border border-gray-300 w-full">{{ arrival.stop_name }}</td>
+                            <td class="border border-gray-300 w-full">{{ arrival.route_name }}</td>
+                            <td class="border border-gray-300 w-full">
                                 <span class="{% if arrival.arrival_time_seconds <= 300 %}arrival-time-green{% else %}arrival-time-red{% endif %}">
                                     {{ arrival.arrival_time }}
                                 </span>
@@ -51,7 +67,7 @@
                 <p class="text-gray-600 text-center">No arrivals to display. Please check the starting point or transit type.</p>
             {% endif %}
         </div>
-        <p class="text-sm text-gray-500 text-center mt-4">Last Updated: {{ last_updated }}</p>
+        <p class="text-sm text-gray-500 text-center mt-4">Last Updated: {{ last_updated }} / Processing Time: {{ elapsed_time }} seconds</p>
     </div>
 </body>
 </html>
