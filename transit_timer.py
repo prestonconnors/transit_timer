@@ -11,8 +11,6 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from operator import itemgetter
-from itertools import groupby
-
 
 import pycron
 import pytz
@@ -44,7 +42,8 @@ def load_gtfs_static_data(gtfs_static_data_folder):
 def get_gtfs_static_data(gtfs_static_data_folder):
     ''' Return cached static GTFS data '''
     if gtfs_static_data_folder not in gtfs_static_data_cache:
-        gtfs_static_data_cache[gtfs_static_data_folder] = load_gtfs_static_data(gtfs_static_data_folder)
+        gtfs_static_data_cache[gtfs_static_data_folder] = \
+        load_gtfs_static_data(gtfs_static_data_folder)
     return gtfs_static_data_cache[gtfs_static_data_folder]
 
 def gtfs_lookup(data, column_name, match):
@@ -53,6 +52,7 @@ def gtfs_lookup(data, column_name, match):
     return [d_d for d_d in data if pattern.search(d_d[column_name])]
 
 def fetch_gtfs_data(url):
+    ''' fetch_gtfs_data '''
     response = requests.get(url, timeout=10)
     response.raise_for_status()
     return response.content
@@ -170,6 +170,22 @@ def is_quiet_time(settings):
 
     return bool(deleted_stops == total_stops)
 
+def group_and_filter_arrivals(arrivals, stops_to_return):
+    ''' group_and_filter_arrivals '''
+
+    grouped_data = defaultdict(list)
+    for arrival in arrivals:
+        grouped_data[arrival["stop_name"]].append(arrival)
+
+    filtered_data = []
+    for _, group in grouped_data.items():
+        filtered_data.extend(sorted(group, key=lambda x: x["arrival_time_seconds"])
+                            [:stops_to_return])
+
+    return filtered_data
+
+
+
 @app.route('/starting_point/<starting_point>')
 def index(starting_point):
     ''' index '''
@@ -205,18 +221,8 @@ def index(starting_point):
                                                          entity,
                                                          update))
 
-    arrivals = sorted(arrivals, key=itemgetter("stop_name", "arrival_time_seconds"))
-
-    grouped_data = defaultdict(list)
-    for arrival in arrivals:
-        grouped_data[arrival["stop_name"]].append(arrival)
-
-    filtered_data = []
-    for _, group in grouped_data.items():
-        filtered_data.extend(sorted(group, key=lambda x: x["arrival_time_seconds"])
-                            [:settings["stops_to_return"]])
-
-    arrivals = sorted(filtered_data, key=itemgetter("stop_name", "arrival_time_seconds"))
+    filtered_arrivals = group_and_filter_arrivals(arrivals, settings["stops_to_return"])
+    arrivals = sorted(filtered_arrivals, key=itemgetter("arrival_time_seconds", "stop_name"))
 
     elapsed_time = time.time() - start_time
 
