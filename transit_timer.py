@@ -18,12 +18,18 @@ import requests
 import yaml
 
 from flask import Flask, render_template
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 from humanize import naturaltime
 from google.transit import gtfs_realtime_pb2
 
 # Initialize Flask app
 templates_folder = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")
 app = Flask(__name__, template_folder=templates_folder)
+
+# Set up Flask-Limiter for rate limiting
+limiter = Limiter(get_remote_address, app=app, default_limits=["10 per second"])
 
 # Cache static GTFS data at app startup
 gtfs_static_data_cache = {}
