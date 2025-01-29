@@ -59,8 +59,8 @@
                     </thead>
                     <tbody>
                         {% for arrival in arrivals %}
-                        <tr bgcolor="{{ arrival.background_color }}">
-                            <td class="border border-gray-300 w-full">{{ arrival.stop_name }}</td>
+                        <tr bgcolor="{{ arrival.route_color }}">
+                            <td class="border border-gray-300 w-full" style="color: {{ arrival.route_text_color }}">{{ arrival.stop_name }}</td>
                             <td class="border border-gray-300 w-full">{{ arrival.route_name }}</td>
                             <td class="border border-gray-300 w-full">
                                 <span class="{% if arrival.arrival_time_seconds <= 300 %}arrival-time-green{% else %}arrival-time-red{% endif %}">

@@ -71,9 +71,12 @@ def get_stops(settings, gtfs_static_data, transit_type):
     else:
         key = ""
 
+    stops = settings["transit_type"][transit_type]["stops"]
+
     stop_ids = [
-        _["stop_id"] for stop_name in settings["transit_type"][transit_type]["stops"]
+        _["stop_id"] for stop_name in stops
         for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", stop_name)
+        if _["stop_id"] not in settings["transit_type"][transit_type]["stops"][stop_name].get("exclude_stops", [])
     ]
 
     urls = [
@@ -130,10 +133,11 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
     ''' Get Arrival Data'''
 
     stop_id = update.stop_id
+    route_id = f"^{re.escape(entity.trip_update.trip.route_id)}$"
 
     route_short_name = gtfs_lookup(gtfs_static_data["routes"],
                                    "route_id",
-                                   f"^{entity.trip_update.trip.route_id}$")
+                                   route_id)
     route_short_name = ' + '.join({_["route_short_name"] for _ in route_short_name})
 
     trip_headsign = gtfs_lookup(gtfs_static_data["trips"],
@@ -141,17 +145,51 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
                                 entity.trip_update.trip.trip_id)
     trip_headsign = ' + '.join({_["trip_headsign"] for _ in trip_headsign})
 
+    trip_direction = gtfs_lookup(gtfs_static_data["trips"],
+                                "trip_id",
+                                f".*{entity.trip_update.trip.trip_id}")
+
+    if transit_type == "bus" and trip_direction:
+        if trip_direction[0]["direction_id"] == "0" and "CROSSTOWN" in trip_headsign:
+            trip_direction = "To East Side"
+        elif trip_direction[0]["direction_id"] == "1" and "CROSSTOWN" in trip_headsign:
+            trip_direction = "To West Side"
+        elif trip_direction[0]["direction_id"] == "0":
+            trip_direction = "Uptown"
+        elif trip_direction[0]["direction_id"] == "1":
+            trip_direction = "Downtown"
+        else:
+            trip_direction = "Unknown Direction"
+
+    elif transit_type == "subway" and trip_direction:
+        if trip_direction[0]["direction_id"] == "0":
+            trip_direction = "Uptown"
+        elif trip_direction[0]["direction_id"] == "1":
+            trip_direction = "Downtown"
+        else:
+            trip_direction = "Unknown Direction"
+
+    else:
+        trip_direction = "Unknown Direction"
+
+
     stop_name = gtfs_lookup(gtfs_static_data["stops"], "stop_id", f"^{stop_id}$")
     stop_name = ' + '.join({_["stop_name"] for _ in stop_name})
 
-    background_color=settings["transit_type"][transit_type]["stops"][stop_name]["background_color"]
+    route_color= gtfs_lookup(gtfs_static_data['routes'],'route_id', route_id)
+    route_color = f"#{route_color[0]['route_color']}"
+
+    route_text_color = gtfs_lookup(gtfs_static_data['routes'],'route_id', route_id)
+    route_text_color = f"#{route_text_color[0]['route_text_color']}"
 
     return {
             "stop_name": stop_name,
-            "route_name": f"{route_short_name} {trip_headsign}",
+            "route_name": f"{route_short_name} {trip_direction}",
             "arrival_time": naturaltime(datetime.datetime.fromtimestamp((update.arrival.time))),
             "arrival_time_seconds": update.arrival.time - time.time(),
-            "background_color": background_color,
+            "route_color": route_color,
+            "route_text_color": route_text_color,
+            "trip_direction": trip_direction,
     }
 
 def display_stop(timezone, schedule):
