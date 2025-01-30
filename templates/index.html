@@ -8,7 +8,7 @@
     <meta http-equiv="refresh" content="60">
     <style>
         body {
-            font-size: 1.5rem;
+            font-size: 2rem; /* Larger text for better readability on tablets */
             display: flex;
             flex-direction: column;
             justify-content: flex-start;
@@ -17,6 +17,9 @@
             overflow: auto;
             height: 100%;
             max-width: 100%;
+            background-color: black;
+            color: white;
+            text-shadow: 2px 2px 4px black;
         }
         table {
             width: 100vw;
@@ -28,41 +31,61 @@
             word-wrap: break-word;
             overflow-wrap: break-word;
             text-align: center;
-            padding: 0.5rem;
+            padding: 1rem; /* Increase padding for touch accessibility */
+            font-size: 1.8rem; /* Increase font size for readability */
+            text-shadow: 2px 2px 4px black;
         }
         th {
-            background-color: #f9fafb;
+            background-color: #333;
             font-weight: bold;
         }
         .arrival-time-green {
-            color: green;
+            color: #00FF00 !important; /* Bright green for better readability */
             font-weight: bold;
+            text-shadow: 2px 2px 4px black;
         }
         .arrival-time-red {
-            color: red;
+            color: #FF4500 !important; /* Bright orange-red for better readability */
             font-weight: bold;
+            text-shadow: 2px 2px 4px black;
         }
     </style>
+    <script>
+        function speakArrival(routeName) {
+            if ('speechSynthesis' in window) {
+                let utterance = new SpeechSynthesisUtterance(routeName);
+                utterance.lang = 'en-US';
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            document.querySelectorAll(".arrival-time-green").forEach(function(element) {
+                let routeName = element.closest("tr").querySelector("td:nth-child(2)").innerText;
+                speakArrival(routeName);
+            });
+        });
+    </script>
 </head>
-<body class="bg-gray-100 font-sans">
+<body class="font-sans">
     <div class="w-full px-4">
-        <div class="bg-white shadow-md rounded-lg w-full max-w-screen-lg overflow-hidden">
+        <div class="bg-gray-900 shadow-md rounded-lg w-full max-w-screen-lg overflow-hidden">
 
             {% if arrivals %}
-                <table class="border-collapse border border-gray-200">
+                <table class="border-collapse border border-gray-700">
                     <thead>
                         <tr>
-                            <th class="border border-gray-300">Stop</th>
-                            <th class="border border-gray-300">Route</th>
-                            <th class="border border-gray-300">Arrival Time</th>
+                            <th class="border border-gray-600">Stop</th>
+                            <th class="border border-gray-600">Route</th>
+                            <th class="border border-gray-600">Arrival Time</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for arrival in arrivals %}
-                        <tr bgcolor="{{ arrival.route_color }}">
-                            <td class="border border-gray-300 w-full" style="color: {{ arrival.route_text_color }}">{{ arrival.stop_name }}</td>
-                            <td class="border border-gray-300 w-full">{{ arrival.route_name }}</td>
-                            <td class="border border-gray-300 w-full">
+                        <tr style="background-color: {{ arrival.route_color }}; color: {{ arrival.route_text_color }};">
+                            <td class="border border-gray-600 w-full">{{ arrival.stop_name }}</td>
+                            <td class="border border-gray-600 w-full">{{ arrival.route_name }}</td>
+                            <td class="border border-gray-600 w-full">
                                 <span class="{% if arrival.arrival_time_seconds <= 300 %}arrival-time-green{% else %}arrival-time-red{% endif %}">
                                     {{ arrival.arrival_time }}
                                 </span>
@@ -72,10 +95,10 @@
                     </tbody>
                 </table>
             {% else %}
-                <p class="text-gray-600 text-center">No arrivals to display. Please check the starting point or transit type.</p>
+                <p class="text-gray-400 text-center text-2xl">No arrivals to display. Please check the starting point or transit type.</p>
             {% endif %}
         </div>
-        <p class="text-sm text-gray-500 text-center mt-4">Last Updated: {{ last_updated }} / Processing Time: {{ elapsed_time }} seconds</p>
+        <p class="text-lg text-gray-400 text-center mt-4">Last Updated: {{ last_updated }} / Processing Time: {{ elapsed_time }} seconds</p>
     </div>
 </body>
 </html>

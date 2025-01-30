@@ -135,6 +135,9 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
     stop_id = update.stop_id
     route_id = f"^{re.escape(entity.trip_update.trip.route_id)}$"
 
+    stop_name = gtfs_lookup(gtfs_static_data["stops"], "stop_id", f"^{stop_id}$")
+    stop_name = ' + '.join({_["stop_name"] for _ in stop_name})
+
     route_short_name = gtfs_lookup(gtfs_static_data["routes"],
                                    "route_id",
                                    route_id)
@@ -149,32 +152,15 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
                                 "trip_id",
                                 f".*{entity.trip_update.trip.trip_id}")
 
-    if transit_type == "bus" and trip_direction:
-        if trip_direction[0]["direction_id"] == "0" and "CROSSTOWN" in trip_headsign:
-            trip_direction = "To East Side"
-        elif trip_direction[0]["direction_id"] == "1" and "CROSSTOWN" in trip_headsign:
-            trip_direction = "To West Side"
-        elif trip_direction[0]["direction_id"] == "0":
-            trip_direction = "Uptown"
-        elif trip_direction[0]["direction_id"] == "1":
-            trip_direction = "Downtown"
-        else:
-            trip_direction = "Unknown Direction"
+    stop = settings["transit_type"][transit_type]["stops"][stop_name]
 
-    elif transit_type == "subway" and trip_direction:
-        if trip_direction[0]["direction_id"] == "0":
-            trip_direction = "Uptown"
-        elif trip_direction[0]["direction_id"] == "1":
-            trip_direction = "Downtown"
-        else:
-            trip_direction = "Unknown Direction"
+    if "direction_id_to_name" in stop:
+        trip_direction = stop["direction_id_to_name"].get(trip_direction[0]["direction_id"],
+                                                          "Unknown Direction")
 
     else:
-        trip_direction = "Unknown Direction"
-
-
-    stop_name = gtfs_lookup(gtfs_static_data["stops"], "stop_id", f"^{stop_id}$")
-    stop_name = ' + '.join({_["stop_name"] for _ in stop_name})
+        trip_direction = settings["direction_id_to_name"].get(trip_direction[0]["direction_id"],
+                                                              "Unknown Direction")
 
     route_color= gtfs_lookup(gtfs_static_data['routes'],'route_id', route_id)
     route_color = f"#{route_color[0]['route_color']}"
