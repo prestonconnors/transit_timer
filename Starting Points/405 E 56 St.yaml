@@ -15,13 +15,17 @@ transit_type:
     buffer: 120
     stops:
       "1 AV/E 57 ST":
+<<<<<<< HEAD
         time_to_stop: 192.5
+=======
+        time_to_stop: 179.5
+>>>>>>> 0d36eb6e37dd8249a9502ff4c731a7103d27d7fa
         schedule: "* 6-20 * * 0,2,5,6"
-        schedule: "* * * * *"
+#        schedule: "* * * * *"
       "E 57 ST/1 AV":
         time_to_stop: 192.5
         schedule: "* 6-20 * * 0,2,5,6"
-        schedule: "* * * * *"
+#        schedule: "* * * * *"
         exclude_stops:
           - "402217"
         direction_id_to_name:
@@ -30,7 +34,11 @@ transit_type:
       "3 AV/E 57 ST":
         time_to_stop: 300
         schedule: "* 5,6,7 * * 1,3,4"
+<<<<<<< HEAD
         schedule: "* * * * *"
+=======
+#        schedule: "* * * * *"
+>>>>>>> 0d36eb6e37dd8249a9502ff4c731a7103d27d7fa
 
   subway:
     gtfs_static_data: "gtfs_subway"
@@ -47,6 +55,7 @@ transit_type:
     stops:
       "Lexington Av/53 St":
         time_to_stop: 300
+<<<<<<< HEAD
         schedule: "* 6-20 * * 0,2,5,6"
         schedule: "* * * * *"
       "Lexington Av/59 St":
@@ -55,5 +64,7 @@ transit_type:
         schedule: "* * * * *"
       "Lexington Av/63 St":
         time_to_stop: 300
+=======
+>>>>>>> 0d36eb6e37dd8249a9502ff4c731a7103d27d7fa
         schedule: "* 6-20 * * 0,2,5,6"
-        schedule: "* * * * *"
+#        schedule: "* * * * *"
