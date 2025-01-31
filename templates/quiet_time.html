@@ -2,10 +2,27 @@
 <html lang="en">
 <head>
     <meta http-equiv="refresh" content="60">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiet Time</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <style>
+        body {
+            font-size: 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: black;
+            color: white;
+            text-shadow: 2px 2px 4px black;
+        }
+    </style>
 </head>
 <body>
-    Quiet Time
-    <br>
-    Last Updated: {{ last_updated }}
+    <p class="text-4xl font-bold">Quiet Time</p>
+    <p class="text-lg mt-4">Last Updated: {{ last_updated }}</p>
 </body>
 </html>
