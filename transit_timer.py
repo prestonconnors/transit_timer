@@ -75,7 +75,7 @@ def get_stops(settings, gtfs_static_data, transit_type):
 
     stop_ids = [
         _["stop_id"] for stop_name in stops
-        for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", stop_name)
+        for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", f"^{re.escape(stop_name)}$")
         if _["stop_id"] not in settings["transit_type"][transit_type]["stops"][stop_name].get("exclude_stops", [])
     ]
 
@@ -159,8 +159,11 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
                                                           "Unknown Direction")
 
     else:
-        trip_direction = settings["direction_id_to_name"].get(trip_direction[0]["direction_id"],
-                                                              "Unknown Direction")
+        if trip_direction:
+            trip_direction = settings["direction_id_to_name"].get(trip_direction[0]["direction_id"],
+                                                                  "Unknown Direction")
+        else:
+            trip_direction = "Unknown Direction"
 
     route_color= gtfs_lookup(gtfs_static_data['routes'],'route_id', route_id)
     route_color = f"#{route_color[0]['route_color']}"
