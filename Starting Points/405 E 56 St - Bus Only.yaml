@@ -45,3 +45,7 @@ transit_type:
       #- "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si"
     buffer: 60
     stops:
+      "Lexington Av/53 St":
+        time_to_stop: 300
+        schedule: "59 1 * * 0"
+        #schedule: "* * * * *"
