@@ -11,9 +11,12 @@ GTFS_URLS = [
 
 # Function to get remote file's last modified time
 def get_remote_last_modified(url):
+    print(f"Checking Last-Modified header for {url}")
     response = requests.head(url)
     if "Last-Modified" in response.headers:
-        return datetime.strptime(response.headers["Last-Modified"], "%a, %d %b %Y %H:%M:%S %Z")
+        last_modified = datetime.strptime(response.headers["Last-Modified"], "%a, %d %b %Y %H:%M:%S %Z")
+        print(f"Last-Modified for {url}: {last_modified}")
+        return last_modified
     return None
 
 # Function to get local file's last modified time
@@ -31,10 +34,14 @@ def download_and_extract(url, file_name):
             f.write(chunk)
     print(f"Downloaded {file_name}.")
 
-    # Extract the ZIP file
+    # Create a directory for the extracted files
+    extract_dir = os.path.splitext(file_name)[0]  # Remove .zip extension
+    os.makedirs(extract_dir, exist_ok=True)
+
+    # Extract the ZIP file into its own directory
     with zipfile.ZipFile(file_name, "r") as zip_ref:
-        zip_ref.extractall(".")
-    print(f"Extracted {file_name}.")
+        zip_ref.extractall(extract_dir)
+    print(f"Extracted {file_name} to {extract_dir}.")
 
 # Main script execution
 for url in GTFS_URLS:

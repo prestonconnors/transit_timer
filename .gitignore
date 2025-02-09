@@ -1,4 +1,5 @@
 bus_key
+gtfs_*
 venv/
 *.pyc
 __pycache__/
