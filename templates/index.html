@@ -3,102 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transit Arrivals</title>
+    <title>Select Starting Point</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
-    <meta http-equiv="refresh" content="60">
     <style>
         body {
-            font-size: 2rem; /* Larger text for better readability on tablets */
+            font-size: 2rem;
             display: flex;
             flex-direction: column;
-            justify-content: flex-start;
+            justify-content: center;
             align-items: center;
+            height: 100vh;
             margin: 0;
-            overflow: auto;
-            height: 100%;
-            max-width: 100%;
             background-color: black;
             color: white;
             text-shadow: 2px 2px 4px black;
         }
-        table {
-            width: 100vw;
-            max-width: 100%;
-            table-layout: fixed;
-            border-spacing: 0;
-        }
-        th, td {
-            word-wrap: break-word;
-            overflow-wrap: break-word;
+        .container {
+            width: 90%;
+            max-width: 600px;
             text-align: center;
-            padding: 1rem; /* Increase padding for touch accessibility */
-            font-size: 1.8rem; /* Increase font size for readability */
-            text-shadow: 2px 2px 4px black;
         }
-        th {
+        select, button {
+            font-size: 1.5rem;
+            padding: 0.5rem;
+            margin: 0.5rem;
+            width: 100%;
+            text-align: center;
             background-color: #333;
-            font-weight: bold;
-        }
-        .arrival-time-green {
-            color: #00FF00 !important; /* Bright green for better readability */
-            font-weight: bold;
-            text-shadow: 2px 2px 4px black;
-        }
-        .arrival-time-red {
-            color: #FF4500 !important; /* Bright orange-red for better readability */
-            font-weight: bold;
-            text-shadow: 2px 2px 4px black;
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
         }
     </style>
     <script>
-        function speakArrival(routeName) {
-            if ('speechSynthesis' in window) {
-                let utterance = new SpeechSynthesisUtterance(routeName);
-                utterance.lang = 'en-US';
-                speechSynthesis.speak(utterance);
+        function updateAction(event) {
+            event.preventDefault();
+            var form = document.getElementById("startingPointForm");
+            var selectedPoint = document.getElementById("starting_point").value;
+            var selectedTypes = Array.from(document.getElementById("transit_type").selectedOptions).map(option => option.value);
+            
+            var url = "/starting_point/" + encodeURIComponent(selectedPoint);
+            if (selectedTypes.length > 0 && !selectedTypes.includes("all")) {
+                url += "?" + selectedTypes.map(type => "transit_type=" + encodeURIComponent(type)).join("&");
             }
+            window.location.href = url;
         }
-
-        document.addEventListener("DOMContentLoaded", function () {
-            document.querySelectorAll(".arrival-time-green").forEach(function(element) {
-                let routeName = element.closest("tr").querySelector("td:nth-child(2)").innerText;
-                speakArrival(routeName);
-            });
-        });
     </script>
 </head>
-<body class="font-sans">
-    <div class="w-full px-4">
-        <div class="bg-gray-900 shadow-md rounded-lg w-full max-w-screen-lg overflow-hidden">
-
-            {% if arrivals %}
-                <table class="border-collapse border border-gray-700">
-                    <thead style="font-size: 1rem;">
-                        <tr>
-                            <th class="border border-gray-600 text-sm">Stop</th>
-                            <th class="border border-gray-600 text-sm">Route</th>
-                            <th class="border border-gray-600 text-sm">Arrival Time</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for arrival in arrivals %}
-                        <tr style="background-color: {{ arrival.route_color }}; color: {{ arrival.route_text_color }};">
-                            <td class="border border-gray-600 w-full">{{ arrival.stop_name }}</td>
-                            <td class="border border-gray-600 w-full">{{ arrival.route_name }}</td>
-                            <td class="border border-gray-600 w-full">
-                                <span class="{% if arrival.arrival_time_seconds <= 300 %}arrival-time-green{% else %}arrival-time-red{% endif %}">
-                                    {{ arrival.arrival_time }}
-                                </span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p class="text-gray-400 text-center text-2xl">No arrivals to display. Please check the starting point or transit type.</p>
-            {% endif %}
-        </div>
-        <p class="text-lg text-gray-400 text-center mt-4">Last Updated: {{ last_updated }} / Processing Time: {{ elapsed_time }} seconds</p>
+<body>
+    <div class="container">
+        <h1 class="text-4xl font-bold mb-6">Select Your Starting Point</h1>
+        <form id="startingPointForm" onsubmit="updateAction(event)">
+            <label for="starting_point" class="block text-xl">Choose a Starting Point:</label>
+            <select id="starting_point" name="starting_point" required>
+                {% for point in starting_points %}
+                    <option value="{{ point.name }}">{{ point.description }}</option>
+                {% endfor %}
+            </select>
+            <label for="transit_type" class="block text-xl mt-4">Choose Transit Type(s):</label>
+            <select id="transit_type" name="transit_type" multiple>
+                <option value="all">All Transit Types</option>
+                {% for point in starting_points %}
+                    {% for transit in point.transit_types %}
+                        <option value="{{ transit }}">{{ transit.title() }}</option>
+                    {% endfor %}
+                {% endfor %}
+            </select>
+            <button type="submit" class="mt-6 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Go</button>
+        </form>
     </div>
 </body>
 </html>

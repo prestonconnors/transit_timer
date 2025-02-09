@@ -17,7 +17,7 @@ import pytz
 import requests
 import yaml
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -33,6 +33,13 @@ limiter = Limiter(get_remote_address, app=app, default_limits=["10 per second"])
 
 # Cache static GTFS data at app startup
 gtfs_static_data_cache = {}
+
+def time_function(func, *args, **kwargs):
+    ''' Measure execution time of a function '''
+    start_time = time.time()
+    result = func(*args, **kwargs)
+    elapsed_time = round(time.time() - start_time, 2)
+    return result, elapsed_time
 
 def load_gtfs_static_data(gtfs_static_data_folder):
     ''' Load static GTFS data into cache '''
@@ -58,10 +65,12 @@ def gtfs_lookup(data, column_name, match):
     return [d_d for d_d in data if pattern.search(d_d[column_name])]
 
 def fetch_gtfs_data(url):
-    ''' fetch_gtfs_data '''
+    ''' Fetch GTFS real-time data and measure time '''
+    start_time = time.time()
     response = requests.get(url, timeout=10)
+    elapsed_time = round(time.time() - start_time, 2)
     response.raise_for_status()
-    return response.content
+    return response.content, elapsed_time
 
 def get_stops(settings, gtfs_static_data, transit_type):
     ''' Get Stops with parallel HTTP requests '''
@@ -71,12 +80,9 @@ def get_stops(settings, gtfs_static_data, transit_type):
     else:
         key = ""
 
-    stops = settings["transit_type"][transit_type]["stops"]
-
     stop_ids = [
-        _["stop_id"] for stop_name in stops
-        for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", f"^{re.escape(stop_name)}$")
-        if _["stop_id"] not in settings["transit_type"][transit_type]["stops"][stop_name].get("exclude_stops", [])
+        _["stop_id"] for stop_name in settings["transit_type"][transit_type]["stops"]
+        for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", f"^{stop_name}$")
     ]
 
     urls = [
@@ -85,9 +91,11 @@ def get_stops(settings, gtfs_static_data, transit_type):
     ]
 
     entities = []
+    processing_times = {}
     with ThreadPoolExecutor() as executor:
-        responses = executor.map(fetch_gtfs_data, urls)
-        for content in responses:
+        results = executor.map(fetch_gtfs_data, urls)
+        for url, (content, elapsed_time) in zip(urls, results):
+            processing_times[url] = elapsed_time
             feed = gtfs_realtime_pb2.FeedMessage()
             feed.ParseFromString(content)
             for entity in feed.entity:
@@ -96,7 +104,7 @@ def get_stops(settings, gtfs_static_data, transit_type):
                     entities.append(entity)
 
     upcoming_stops(settings["stops_to_return"], entities)
-    return entities
+    return entities, processing_times
 
 def clean_entity(stop_ids, entity):
     '''Removes stops we don't care about'''
@@ -217,52 +225,77 @@ def group_and_filter_arrivals(arrivals, stops_to_return):
 
     return filtered_data
 
+def get_available_starting_points():
+    ''' Retrieve available starting points and their descriptions '''
+    starting_point_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "Starting Points")
+    starting_points = []
 
+    for file_name in os.listdir(starting_point_dir):
+        if file_name.endswith(".yaml"):
+            file_path = os.path.join(starting_point_dir, file_name)
+            with open(file_path, 'r', encoding="utf-8") as file:
+                settings = yaml.safe_load(file)
+                starting_points.append({
+                    "name": os.path.splitext(file_name)[0],
+                    "description": settings.get("description", "No description available"),
+                    "transit_types": list(settings.get("transit_type", {}).keys())
+                })
+
+    return starting_points
+
+@app.route('/')
+def index():
+    ''' Display the index page with available starting points '''
+    starting_points = get_available_starting_points()
+    return render_template("index.html", starting_points=starting_points)
 
 @app.route('/starting_point/<starting_point>')
-def index(starting_point):
-    ''' index '''
-
+def display_starting_point(starting_point):
+    ''' starting_point '''
+    debug_times = {}
     start_time = time.time()
 
-    settings = load_settings(starting_point)
+    settings, debug_times["load_settings"] = time_function(load_settings, starting_point)
+    transit_types = request.args.getlist('transit_type')
+
+    if not transit_types:
+        transit_types = list(settings["transit_type"].keys())
 
     my_datetime = datetime.datetime.now().astimezone(pytz.timezone(settings["timezone"]))
-
-    entities = {}
     arrivals = []
+    processing_times = {}
 
     if is_quiet_time(settings):
         return render_template("quiet_time.html",
                                last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"))
 
+    for transit_type in transit_types:
+        if transit_type in settings["transit_type"]:
+            gtfs_static_data_folder = settings["transit_type"][transit_type]["gtfs_static_data"]
+            gtfs_static_data, debug_times[f"get_gtfs_static_data_{transit_type}"] = time_function(get_gtfs_static_data, gtfs_static_data_folder)
+            entities, times = get_stops(settings, gtfs_static_data, transit_type)
+            processing_times.update(times)
 
-    for transit_type in settings["transit_type"]:
-        gtfs_static_data_folder = settings["transit_type"][transit_type]["gtfs_static_data"]
-        gtfs_static_data = get_gtfs_static_data(gtfs_static_data_folder)
-        entities = get_stops(settings, gtfs_static_data, transit_type)
+            for entity in entities:
+                if 'trip_update' in entity:
+                    for update in entity.trip_update.stop_time_update:
+                        arrival_time = update.arrival.time
 
-        for entity in entities:
-            if 'trip_update' in entity:
-                for update in entity.trip_update.stop_time_update:
-                    arrival_time = update.arrival.time
+                        if arrival_time >= time.time():
+                            arrival_data, debug_times[f"get_arrival_data_{transit_type}"] = time_function(get_arrival_data, settings, transit_type, gtfs_static_data, entity, update)
+                            arrivals.append(arrival_data)
 
-                    if arrival_time >= time.time():
-                        arrivals.append(get_arrival_data(settings,
-                                                         transit_type,
-                                                         gtfs_static_data,
-                                                         entity,
-                                                         update))
-
-    filtered_arrivals = group_and_filter_arrivals(arrivals, settings["stops_to_return"])
+    filtered_arrivals, debug_times["group_and_filter_arrivals"] = time_function(group_and_filter_arrivals, arrivals, settings["stops_to_return"])
     arrivals = sorted(filtered_arrivals, key=itemgetter("arrival_time_seconds", "stop_name"))
 
     elapsed_time = time.time() - start_time
 
-    return render_template("index.html",
+    return render_template("starting_point.html",
                            arrivals=arrivals,
                            last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"),
-                           elapsed_time=round(elapsed_time,2))
+                           elapsed_time=round(elapsed_time, 2),
+                           processing_times=processing_times,
+                           debug_times=debug_times)
 
 # Run the app
 if __name__ == '__main__':

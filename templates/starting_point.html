@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transit Arrivals</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <meta http-equiv="refresh" content="60">
+    <style>
+        body {
+            font-size: 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            margin: 0;
+            overflow: auto;
+            height: 100%;
+            max-width: 100%;
+            background-color: black;
+            color: white;
+            text-shadow: 2px 2px 4px black;
+        }
+        table {
+            width: 100vw;
+            max-width: 100%;
+            table-layout: fixed;
+            border-spacing: 0;
+        }
+        th, td {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            text-align: center;
+            padding: 1rem;
+            font-size: 1.8rem;
+            text-shadow: 2px 2px 4px black;
+        }
+        th {
+            background-color: #333;
+            font-weight: bold;
+        }
+        .arrival-time-green {
+            color: #00FF00 !important;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px black;
+        }
+        .arrival-time-red {
+            color: #FF4500 !important;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px black;
+        }
+    </style>
+</head>
+<body>
+    <div class="w-full px-4">
+        <div class="bg-gray-900 shadow-md rounded-lg w-full max-w-screen-lg overflow-hidden">
+
+            {% if arrivals %}
+                <table class="border-collapse border border-gray-700">
+                    <thead>
+                        <tr>
+                            <th class="border border-gray-600">Stop</th>
+                            <th class="border border-gray-600">Route</th>
+                            <th class="border border-gray-600">Arrival Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for arrival in arrivals %}
+                        <tr style="background-color: {{ arrival.route_color }}; color: {{ arrival.route_text_color }};">
+                            <td class="border border-gray-600 w-full">{{ arrival.stop_name }}</td>
+                            <td class="border border-gray-600 w-full">{{ arrival.route_name }}</td>
+                            <td class="border border-gray-600 w-full">
+                                <span class="{% if arrival.arrival_time_seconds <= 300 %}arrival-time-green{% else %}arrival-time-red{% endif %}">
+                                    {{ arrival.arrival_time }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="text-gray-400 text-center text-2xl">No arrivals to display. Please check the starting point or transit type.</p>
+            {% endif %}
+        </div>
+
+    <div class="container mt-8 text-lg text-gray-400 text-center">
+    <p class="text-lg text-gray-400 text-center mt-4">Last Updated: {{ last_updated }} / Processing Time: {{ elapsed_time }} seconds</p>
+    <div class="mt-4 border-t border-gray-600 pt-4">
+        <p class="font-bold">Debug</p>
+        
+        <p class="font-bold">Function Execution Times</p>
+        <p>
+            {% for function, time in debug_times.items() %}
+                {{ function }}: {{ time }} seconds<br>
+            {% endfor %}
+        </p>
+
+        <p class="font-bold">GTFS-RT Processing Times</p>
+        <p>
+            {% for url, time in processing_times.items() %}
+                {{ url }}: {{ time }} seconds<br>
+            {% endfor %}
+        </p>
+    </div>
+</div>
+</body>
+</html>
