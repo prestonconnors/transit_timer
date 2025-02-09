@@ -43,6 +43,14 @@ def download_and_extract(url, file_name):
         zip_ref.extractall(extract_dir)
     print(f"Extracted {file_name} to {extract_dir}.")
 
+    # Remove files other than stops.txt, routes.txt, or trips.txt
+    allowed_files = {"stops.txt", "routes.txt", "trips.txt"}
+    for root, _, files in os.walk(extract_dir):
+        for file in files:
+            if file not in allowed_files:
+                os.remove(os.path.join(root, file))
+                print(f"Removed {file} from {extract_dir}.")
+
 # Main script execution
 for url in GTFS_URLS:
     file_name = os.path.basename(url)
