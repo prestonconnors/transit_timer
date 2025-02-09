@@ -36,18 +36,22 @@
         }
     </style>
     <script>
-        function updateAction(event) {
-            event.preventDefault();
-            var form = document.getElementById("startingPointForm");
-            var selectedPoint = document.getElementById("starting_point").value;
-            var selectedTypes = Array.from(document.getElementById("transit_type").selectedOptions).map(option => option.value);
-            
-            var url = "/starting_point/" + encodeURIComponent(selectedPoint);
-            if (selectedTypes.length > 0 && !selectedTypes.includes("all")) {
-                url += "?" + selectedTypes.map(type => "transit_type=" + encodeURIComponent(type)).join("&");
-            }
-            window.location.href = url;
+    function updateAction(event) {
+        event.preventDefault();
+        var form = document.getElementById("startingPointForm");
+        var selectedPoint = document.getElementById("starting_point").value;
+        var selectedTypes = Array.from(document.getElementById("transit_type").selectedOptions).map(option => option.value);
+
+        // Automatically determine the correct base path
+        var basePath = window.location.pathname.split("/").slice(0, -1).join("/") + "/starting_point/";
+        var url = basePath + encodeURIComponent(selectedPoint);
+
+        if (selectedTypes.length > 0 && !selectedTypes.includes("all")) {
+            url += "?" + selectedTypes.map(type => "transit_type=" + encodeURIComponent(type)).join("&");
         }
+
+        window.location.href = url;
+    }
     </script>
 </head>
 <body>
