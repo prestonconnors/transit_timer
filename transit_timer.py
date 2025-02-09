@@ -4,6 +4,7 @@ import csv
 import copy
 import datetime
 import heapq
+import logging
 import os
 import re
 import time
@@ -23,6 +24,10 @@ from flask_limiter.util import get_remote_address
 
 from humanize import naturaltime
 from google.transit import gtfs_realtime_pb2
+from requests.exceptions import ReadTimeout, RequestException
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialize Flask app
 templates_folder = os.path.join(os.path.dirname(os.path.realpath(__file__)), "templates")
@@ -64,13 +69,30 @@ def gtfs_lookup(data, column_name, match):
     pattern = re.compile(match)
     return [d_d for d_d in data if pattern.search(d_d[column_name])]
 
-def fetch_gtfs_data(url):
-    ''' Fetch GTFS real-time data and measure time '''
-    start_time = time.time()
-    response = requests.get(url, timeout=10)
-    elapsed_time = round(time.time() - start_time, 2)
-    response.raise_for_status()
-    return response.content, elapsed_time
+def fetch_gtfs_data(url, retries=3, backoff_factor=2):
+    ''' Fetch GTFS real-time data with retries and error handling '''
+    attempt = 0
+    while attempt < retries:
+        try:
+            logging.info(f"Fetching {url} (Attempt {attempt + 1})")
+            start_time = time.time()
+            response = requests.get(url, timeout=10)
+            elapsed_time = round(time.time() - start_time, 2)
+            response.raise_for_status()
+            logging.info(f"Successfully fetched {url} in {elapsed_time} seconds")
+            return response.content, elapsed_time
+
+        except ReadTimeout:
+            logging.warning(f"Timeout when fetching {url}. Retrying in {backoff_factor ** attempt} seconds...")
+            time.sleep(backoff_factor ** attempt)  # Exponential backoff
+            attempt += 1
+
+        except RequestException as e:
+            logging.error(f"Request error while fetching {url}: {e}")
+            break  # Stop retrying if it's another request error
+
+    logging.error(f"Failed to fetch {url} after {retries} attempts.")
+    return None, None  # Return None if all retries fail
 
 def get_stops(settings, gtfs_static_data, transit_type):
     ''' Get Stops with parallel HTTP requests '''
