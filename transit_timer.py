@@ -1,6 +1,7 @@
 ''' transit_timer'''
 
 import csv
+import concurrent.futures
 import copy
 import datetime
 import heapq
@@ -8,6 +9,7 @@ import logging
 import os
 import re
 import time
+import numpy as np
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -94,39 +96,88 @@ def fetch_gtfs_data(url, retries=3, backoff_factor=2):
     logging.error(f"Failed to fetch {url} after {retries} attempts.")
     return None, None  # Return None if all retries fail
 
+import asyncio
+import aiohttp
+import time
+from google.transit import gtfs_realtime_pb2
+
+async def fetch_gtfs_data_async(url, session):
+    ''' Asynchronously fetch GTFS real-time data '''
+    try:
+        start_time = time.time()
+        async with session.get(url, timeout=10) as response:
+            response.raise_for_status()
+            content = await response.read()
+            elapsed_time = round(time.time() - start_time, 2)
+            return content, elapsed_time
+    except Exception as e:
+        print(f"Error fetching {url}: {e}")
+        return None, None
+
+async def fetch_and_process_urls(urls, stop_ids):
+    ''' Asynchronously fetch and process GTFS-RT feeds '''
+    processing_times = {}
+    entities = []
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_gtfs_data_async(url, session) for url in urls]
+        results = await asyncio.gather(*tasks)
+
+    for url, (content, elapsed_time) in zip(urls, results):
+        if content is None:
+            continue
+
+        processing_times[url] = elapsed_time
+        feed = gtfs_realtime_pb2.FeedMessage()
+        feed.ParseFromString(content)
+
+        valid_entities = []
+        for entity in feed.entity:
+            if not entity.HasField("trip_update"):
+                continue  # Skip entities without trip updates
+
+            # Filter stop updates
+            filtered_updates = [
+                update for update in entity.trip_update.stop_time_update
+                if update.stop_id.strip().upper() in stop_ids
+            ]
+
+            if filtered_updates:
+                del entity.trip_update.stop_time_update[:]  # Properly clear list
+                entity.trip_update.stop_time_update.extend(filtered_updates)  # Append valid updates
+                valid_entities.append(entity)
+
+        entities.extend(valid_entities)
+
+    return entities, processing_times
+
+
 def get_stops(settings, gtfs_static_data, transit_type):
-    ''' Get Stops with parallel HTTP requests '''
+    ''' Efficiently fetches and processes GTFS-RT data asynchronously '''
+    
+    # Fetch API key (for bus only)
+    key = ""
     if transit_type == "bus":
         with open(settings["bus_key_file"], "r", encoding="utf-8") as file:
             key = f"?key={file.read().strip()}"
-    else:
-        key = ""
 
-    stop_ids = [
-        _["stop_id"] for stop_name in settings["transit_type"][transit_type]["stops"]
-        for _ in gtfs_lookup(gtfs_static_data["stops"], "stop_name", f"^{stop_name}$")
-    ]
+    # Generate URLs with API keys
+    urls = [f"{url}{key}" for url in settings["transit_type"][transit_type]["gtfs-rt_urls"]]
 
-    urls = [
-        f"{gtfs_rt_url}{key}"
-        for gtfs_rt_url in settings["transit_type"][transit_type]["gtfs-rt_urls"]
-    ]
+    # Convert stop list to **set for O(1) lookups**
+    stop_ids = {
+        stop["stop_id"].strip().upper()
+        for stop_name in settings["transit_type"][transit_type]["stops"]
+        for stop in gtfs_lookup(gtfs_static_data["stops"], "stop_name", f"^{re.escape(stop_name)}$")
+    }
 
-    entities = []
-    processing_times = {}
-    with ThreadPoolExecutor() as executor:
-        results = executor.map(fetch_gtfs_data, urls)
-        for url, (content, elapsed_time) in zip(urls, results):
-            processing_times[url] = elapsed_time
-            feed = gtfs_realtime_pb2.FeedMessage()
-            feed.ParseFromString(content)
-            for entity in feed.entity:
-                entity = clean_entity(stop_ids, entity)
-                if len(entity.trip_update.stop_time_update) > 0:
-                    entities.append(entity)
+    # Run async GTFS fetching + processing
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    entities, processing_times = loop.run_until_complete(fetch_and_process_urls(urls, stop_ids))
 
-    upcoming_stops(settings["stops_to_return"], entities)
     return entities, processing_times
+
 
 def clean_entity(stop_ids, entity):
     '''Removes stops we don't care about'''
@@ -159,57 +210,90 @@ def load_settings(starting_point):
     with open(starting_point_file, 'r', encoding="utf-8") as file:
         return yaml.safe_load(file)
 
+import time
+import re
+import humanize
+import datetime
+
 def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
-    ''' Get Arrival Data'''
+    ''' Extracts arrival time and stop information '''
 
-    stop_id = update.stop_id
-    route_id = f"^{re.escape(entity.trip_update.trip.route_id)}$"
+    stop_id = update.stop_id.strip().upper()
 
-    stop_name = gtfs_lookup(gtfs_static_data["stops"], "stop_id", f"^{stop_id}$")
-    stop_name = ' + '.join({_["stop_name"] for _ in stop_name})
+    # Use dictionary lookups (O(1) time) instead of multiple regex searches
+    static_stops = {stop["stop_id"].strip().upper(): stop["stop_name"] for stop in gtfs_static_data["stops"]}
+    static_routes = {route["route_id"]: route for route in gtfs_static_data["routes"]}
 
-    route_short_name = gtfs_lookup(gtfs_static_data["routes"],
-                                   "route_id",
-                                   route_id)
-    route_short_name = ' + '.join({_["route_short_name"] for _ in route_short_name})
+    # Function to modify trip_id if it matches the regex
+    def transform_trip_id(trip_id):
+        """ 
+        Extracts everything after the first `_` and stops at '..[A-Z]', 
+        ensuring only valid characters remain after '..[A-Z]'.
+        """
+        match = re.search(r'_(\d+_.*?\.\.[A-Z])', trip_id)  # Extract number + text up to `..[A-Z]`
+        transformed_id = match.group(1) if match else trip_id  # Keep original if no match
 
-    trip_headsign = gtfs_lookup(gtfs_static_data["trips"],
-                                "trip_id",
-                                entity.trip_update.trip.trip_id)
-    trip_headsign = ' + '.join({_["trip_headsign"] for _ in trip_headsign})
+        final_match = re.search(r'(\d+_.*?\.\.[A-Z])', transformed_id)  # Ensure nothing follows `..[A-Z]`
+        return final_match.group(1) if final_match else transformed_id  # Keep modified or original
 
-    trip_direction = gtfs_lookup(gtfs_static_data["trips"],
-                                "trip_id",
-                                f".*{entity.trip_update.trip.trip_id}")
+    # Apply transformation to trip_id in GTFS static data
+    static_trips = {transform_trip_id(trip["trip_id"]): trip for trip in gtfs_static_data["trips"]}
 
-    stop = settings["transit_type"][transit_type]["stops"][stop_name]
+    stop_name = static_stops.get(stop_id, f"Unknown Stop ({stop_id})")
 
-    if "direction_id_to_name" in stop:
-        trip_direction = stop["direction_id_to_name"].get(trip_direction[0]["direction_id"],
-                                                          "Unknown Direction")
+    if stop_name not in settings["transit_type"][transit_type]["stops"]:
+        print(f"Warning: Stop '{stop_name}' (ID: {stop_id}) not found in settings for {transit_type}")
+        return None  # Skip processing if stop isn't part of the selected transit type
 
+    arrival_time = update.arrival.time
+    arrival_time_seconds = int(arrival_time - time.time())
+
+    # Use humanize.naturaltime to format arrival time
+    arrival_time_relative = humanize.naturaltime(datetime.datetime.fromtimestamp(arrival_time))
+
+    route_id = entity.trip_update.trip.route_id
+    trip_id = transform_trip_id(entity.trip_update.trip.trip_id)  # Apply transformation before lookup
+
+    # Retrieve trip data
+    trip_data = static_trips.get(trip_id, None)
+    
+    # Function to determine direction if no trip data
+    def get_direction_from_trip_id(trip_id):
+        direction_map = {
+            "N": "Uptown",
+            "S": "Downtown",
+            "E": "To East Side",
+            "W": "To West Side"
+        }
+        last_char = trip_id[-1] if trip_id else ""
+        return direction_map.get(last_char, "Unknown Direction")
+
+    # Determine trip direction
+    trip_direction = trip_data.get("direction_id", None) if trip_data else get_direction_from_trip_id(trip_id)
+
+    trip_headsign = trip_data.get("trip_headsign", f"Route {route_id}") if trip_data else trip_direction
+
+    # Retrieve route details
+    route_data = static_routes.get(route_id, {})
+    route_short_name = route_data.get("route_short_name", route_id)
+
+    # Use `settings.yaml` direction names if available
+    stop_settings = settings["transit_type"][transit_type]["stops"].get(stop_name, {})
+    if "direction_id_to_name" in stop_settings:
+        trip_direction = stop_settings["direction_id_to_name"].get(trip_direction, trip_headsign)
     else:
-        if trip_direction:
-            trip_direction = settings["direction_id_to_name"].get(trip_direction[0]["direction_id"],
-                                                                  "Unknown Direction")
-        else:
-            trip_direction = "Unknown Direction"
-
-    route_color= gtfs_lookup(gtfs_static_data['routes'],'route_id', route_id)
-    route_color = f"#{route_color[0]['route_color']}"
-
-    route_text_color = gtfs_lookup(gtfs_static_data['routes'],'route_id', route_id)
-    route_text_color = f"#{route_text_color[0]['route_text_color']}"
+        trip_direction = settings.get("direction_id_to_name", {}).get(trip_direction, trip_headsign)
 
     return {
-            "stop_name": stop_name,
-            "route_name": f"{route_short_name} {trip_direction}",
-            "arrival_time": naturaltime(datetime.datetime.fromtimestamp((update.arrival.time))),
-            "arrival_time_seconds": update.arrival.time - time.time(),
-            "route_color": route_color,
-            "route_text_color": route_text_color,
-            "trip_direction": trip_direction,
+        "stop_id": stop_id,
+        "stop_name": stop_name,
+        "arrival_time": arrival_time_relative,  # Humanized arrival time
+        "arrival_time_seconds": arrival_time_seconds,
+        "route_name": f"{route_short_name} {trip_direction}",
+        "route_color": f"#{route_data.get('route_color', 'FFFFFF')}",
+        "route_text_color": f"#{route_data.get('route_text_color', '000000')}",
     }
+
 
 def display_stop(timezone, schedule):
     ''' display_stop '''
@@ -234,18 +318,16 @@ def is_quiet_time(settings):
     return bool(deleted_stops == total_stops)
 
 def group_and_filter_arrivals(arrivals, stops_to_return):
-    ''' group_and_filter_arrivals '''
-
+    ''' Efficiently group and return the top N arrivals per stop '''
     grouped_data = defaultdict(list)
+
     for arrival in arrivals:
         grouped_data[arrival["stop_name"]].append(arrival)
 
-    filtered_data = []
-    for _, group in grouped_data.items():
-        filtered_data.extend(sorted(group, key=lambda x: x["arrival_time_seconds"])
-                            [:stops_to_return])
-
-    return filtered_data
+    return [
+        item for group in grouped_data.values()
+        for item in sorted(group, key=lambda x: x["arrival_time_seconds"])[:stops_to_return]
+    ]
 
 def get_available_starting_points():
     ''' Retrieve available starting points and their descriptions '''
@@ -272,10 +354,12 @@ def index():
     return render_template("index.html", starting_points=starting_points)
 
 @app.route('/starting_point/<starting_point>')
-def display_starting_point(starting_point):
+def starting_point(starting_point):
     ''' starting_point '''
     debug_times = {}
     start_time = time.time()
+    
+    request_received_time = time.time()  # Log when the request is received
 
     settings, debug_times["load_settings"] = time_function(load_settings, starting_point)
     transit_types = request.args.getlist('transit_type')
@@ -291,6 +375,7 @@ def display_starting_point(starting_point):
         return render_template("quiet_time.html",
                                last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"))
 
+    fetch_start_time = time.time()  # Measure total fetch time
     for transit_type in transit_types:
         if transit_type in settings["transit_type"]:
             gtfs_static_data_folder = settings["transit_type"][transit_type]["gtfs_static_data"]
@@ -307,17 +392,25 @@ def display_starting_point(starting_point):
                             arrival_data, debug_times[f"get_arrival_data_{transit_type}"] = time_function(get_arrival_data, settings, transit_type, gtfs_static_data, entity, update)
                             arrivals.append(arrival_data)
 
+    debug_times["fetch_stops_and_arrivals"] = round(time.time() - fetch_start_time, 2)
+
+    filter_start_time = time.time()
     filtered_arrivals, debug_times["group_and_filter_arrivals"] = time_function(group_and_filter_arrivals, arrivals, settings["stops_to_return"])
     arrivals = sorted(filtered_arrivals, key=itemgetter("arrival_time_seconds", "stop_name"))
+    debug_times["filter_and_sort_arrivals"] = round(time.time() - filter_start_time, 2)
 
-    elapsed_time = time.time() - start_time
+    render_start_time = time.time()
+    response = render_template("starting_point.html",
+                               arrivals=arrivals,
+                               last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"),
+                               elapsed_time=round(time.time() - start_time, 2),
+                               processing_times=processing_times,
+                               debug_times=debug_times)
+    debug_times["render_template"] = round(time.time() - render_start_time, 2)
 
-    return render_template("starting_point.html",
-                           arrivals=arrivals,
-                           last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"),
-                           elapsed_time=round(elapsed_time, 2),
-                           processing_times=processing_times,
-                           debug_times=debug_times)
+    debug_times["total_request_time"] = round(time.time() - request_received_time, 2)
+
+    return response
 
 # Run the app
 if __name__ == '__main__':
