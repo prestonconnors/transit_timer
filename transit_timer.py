@@ -1,7 +1,6 @@
 ''' transit_timer'''
 
 import csv
-import concurrent.futures
 import copy
 import datetime
 import heapq
@@ -9,12 +8,13 @@ import logging
 import os
 import re
 import time
-import numpy as np
 
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from operator import itemgetter
 
+import asyncio
+import aiohttp
+import humanize
 import pycron
 import pytz
 import requests
@@ -24,7 +24,6 @@ from flask import Flask, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from humanize import naturaltime
 from google.transit import gtfs_realtime_pb2
 from requests.exceptions import ReadTimeout, RequestException
 
@@ -40,13 +39,6 @@ limiter = Limiter(get_remote_address, app=app, default_limits=["10 per second"])
 
 # Cache static GTFS data at app startup
 gtfs_static_data_cache = {}
-
-def time_function(func, *args, **kwargs):
-    ''' Measure execution time of a function '''
-    start_time = time.time()
-    result = func(*args, **kwargs)
-    elapsed_time = round(time.time() - start_time, 2)
-    return result, elapsed_time
 
 def load_gtfs_static_data(gtfs_static_data_folder):
     ''' Load static GTFS data into cache '''
@@ -77,12 +69,9 @@ def fetch_gtfs_data(url, retries=3, backoff_factor=2):
     while attempt < retries:
         try:
             logging.info(f"Fetching {url} (Attempt {attempt + 1})")
-            start_time = time.time()
             response = requests.get(url, timeout=10)
-            elapsed_time = round(time.time() - start_time, 2)
             response.raise_for_status()
-            logging.info(f"Successfully fetched {url} in {elapsed_time} seconds")
-            return response.content, elapsed_time
+            return response.content
 
         except ReadTimeout:
             logging.warning(f"Timeout when fetching {url}. Retrying in {backoff_factor ** attempt} seconds...")
@@ -94,40 +83,31 @@ def fetch_gtfs_data(url, retries=3, backoff_factor=2):
             break  # Stop retrying if it's another request error
 
     logging.error(f"Failed to fetch {url} after {retries} attempts.")
-    return None, None  # Return None if all retries fail
-
-import asyncio
-import aiohttp
-import time
-from google.transit import gtfs_realtime_pb2
+    return None  # Return None if all retries fail
 
 async def fetch_gtfs_data_async(url, session):
     ''' Asynchronously fetch GTFS real-time data '''
     try:
-        start_time = time.time()
         async with session.get(url, timeout=10) as response:
             response.raise_for_status()
             content = await response.read()
-            elapsed_time = round(time.time() - start_time, 2)
-            return content, elapsed_time
+            return content
     except Exception as e:
         print(f"Error fetching {url}: {e}")
-        return None, None
+        return None
 
 async def fetch_and_process_urls(urls, stop_ids):
     ''' Asynchronously fetch and process GTFS-RT feeds '''
-    processing_times = {}
     entities = []
 
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_gtfs_data_async(url, session) for url in urls]
         results = await asyncio.gather(*tasks)
 
-    for url, (content, elapsed_time) in zip(urls, results):
+    for url, content in zip(urls, results):
         if content is None:
             continue
 
-        processing_times[url] = elapsed_time
         feed = gtfs_realtime_pb2.FeedMessage()
         feed.ParseFromString(content)
 
@@ -149,7 +129,7 @@ async def fetch_and_process_urls(urls, stop_ids):
 
         entities.extend(valid_entities)
 
-    return entities, processing_times
+    return entities
 
 
 def get_stops(settings, gtfs_static_data, transit_type):
@@ -174,10 +154,9 @@ def get_stops(settings, gtfs_static_data, transit_type):
     # Run async GTFS fetching + processing
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    entities, processing_times = loop.run_until_complete(fetch_and_process_urls(urls, stop_ids))
+    entities = loop.run_until_complete(fetch_and_process_urls(urls, stop_ids))
 
-    return entities, processing_times
-
+    return entities
 
 def clean_entity(stop_ids, entity):
     '''Removes stops we don't care about'''
@@ -209,11 +188,6 @@ def load_settings(starting_point):
 
     with open(starting_point_file, 'r', encoding="utf-8") as file:
         return yaml.safe_load(file)
-
-import time
-import re
-import humanize
-import datetime
 
 def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
     ''' Extracts arrival time and stop information '''
@@ -252,11 +226,11 @@ def get_arrival_data(settings, transit_type, gtfs_static_data, entity, update):
     arrival_time_relative = humanize.naturaltime(datetime.datetime.fromtimestamp(arrival_time))
 
     route_id = entity.trip_update.trip.route_id
-    trip_id = transform_trip_id(entity.trip_update.trip.trip_id)  # Apply transformation before lookup
+    trip_id = transform_trip_id(entity.trip_update.trip.trip_id)
 
     # Retrieve trip data
     trip_data = static_trips.get(trip_id, None)
-    
+
     # Function to determine direction if no trip data
     def get_direction_from_trip_id(trip_id):
         direction_map = {
@@ -356,12 +330,9 @@ def index():
 @app.route('/starting_point/<starting_point>')
 def starting_point(starting_point):
     ''' starting_point '''
-    debug_times = {}
     start_time = time.time()
-    
-    request_received_time = time.time()  # Log when the request is received
 
-    settings, debug_times["load_settings"] = time_function(load_settings, starting_point)
+    settings = load_settings(starting_point)
     transit_types = request.args.getlist('transit_type')
 
     if not transit_types:
@@ -369,19 +340,16 @@ def starting_point(starting_point):
 
     my_datetime = datetime.datetime.now().astimezone(pytz.timezone(settings["timezone"]))
     arrivals = []
-    processing_times = {}
 
     if is_quiet_time(settings):
         return render_template("quiet_time.html",
                                last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"))
 
-    fetch_start_time = time.time()  # Measure total fetch time
     for transit_type in transit_types:
         if transit_type in settings["transit_type"]:
             gtfs_static_data_folder = settings["transit_type"][transit_type]["gtfs_static_data"]
-            gtfs_static_data, debug_times[f"get_gtfs_static_data_{transit_type}"] = time_function(get_gtfs_static_data, gtfs_static_data_folder)
-            entities, times = get_stops(settings, gtfs_static_data, transit_type)
-            processing_times.update(times)
+            gtfs_static_data = get_gtfs_static_data(gtfs_static_data_folder)
+            entities = get_stops(settings, gtfs_static_data, transit_type)
 
             for entity in entities:
                 if 'trip_update' in entity:
@@ -389,26 +357,16 @@ def starting_point(starting_point):
                         arrival_time = update.arrival.time
 
                         if arrival_time >= time.time():
-                            arrival_data, debug_times[f"get_arrival_data_{transit_type}"] = time_function(get_arrival_data, settings, transit_type, gtfs_static_data, entity, update)
+                            arrival_data = get_arrival_data(settings, transit_type, gtfs_static_data, entity, update)
                             arrivals.append(arrival_data)
 
-    debug_times["fetch_stops_and_arrivals"] = round(time.time() - fetch_start_time, 2)
-
-    filter_start_time = time.time()
-    filtered_arrivals, debug_times["group_and_filter_arrivals"] = time_function(group_and_filter_arrivals, arrivals, settings["stops_to_return"])
+    filtered_arrivals = group_and_filter_arrivals(arrivals, settings["stops_to_return"])
     arrivals = sorted(filtered_arrivals, key=itemgetter("arrival_time_seconds", "stop_name"))
-    debug_times["filter_and_sort_arrivals"] = round(time.time() - filter_start_time, 2)
 
-    render_start_time = time.time()
     response = render_template("starting_point.html",
                                arrivals=arrivals,
                                last_updated=my_datetime.strftime("%Y-%m-%d %I:%M:%S %p"),
-                               elapsed_time=round(time.time() - start_time, 2),
-                               processing_times=processing_times,
-                               debug_times=debug_times)
-    debug_times["render_template"] = round(time.time() - render_start_time, 2)
-
-    debug_times["total_request_time"] = round(time.time() - request_received_time, 2)
+                               elapsed_time=round(time.time() - start_time, 2))
 
     return response
 

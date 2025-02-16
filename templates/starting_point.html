@@ -85,23 +85,6 @@
 
     <div class="container mt-8 text-lg text-gray-400 text-center">
     <p class="text-lg text-gray-400 text-center mt-4">Last Updated: {{ last_updated }} / Processing Time: {{ elapsed_time }} seconds</p>
-    <div class="mt-4 border-t border-gray-600 pt-4">
-        <p class="font-bold">Debug</p>
-        
-        <p class="font-bold">Function Execution Times</p>
-        <p>
-            {% for function, time in debug_times.items() %}
-                {{ function }}: {{ time }} seconds<br>
-            {% endfor %}
-        </p>
-
-        <p class="font-bold">GTFS-RT Processing Times</p>
-        <p>
-            {% for url, time in processing_times.items() %}
-                {{ url }}: {{ time }} seconds<br>
-            {% endfor %}
-        </p>
     </div>
-</div>
 </body>
 </html>
